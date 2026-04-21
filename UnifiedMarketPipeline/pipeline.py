@@ -20,6 +20,7 @@ from typing import Optional
 
 import httpx
 
+import vector_store
 from models import UnifiedMarket, Exchange
 from adapters import (
     KalshiAdapter,
@@ -132,6 +133,18 @@ def export_embedding_corpus(markets: list[UnifiedMarket], path: Path):
     logger.info(f"Exported embedding corpus ({len(records)} docs) to {path}")
 
 
+async def export_to_vector_store(markets: list[UnifiedMarket]):
+    """Index markets in the Qdrant vector database."""
+    if not markets:
+        return
+    
+    logger.info(f"Indexing {len(markets)} markets into Qdrant...")
+    data = [m.to_dict() for m in markets]
+    
+    # Run in thread pool because embedding generation is CPU intensive
+    await asyncio.to_thread(vector_store.upsert_markets, data)
+
+
 def print_summary(markets: list[UnifiedMarket]):
     """Print a summary table to stdout."""
     by_exchange = {}
@@ -154,7 +167,7 @@ def print_summary(markets: list[UnifiedMarket]):
     print("=" * 70 + "\n")
 
 
-def main():
+async def async_main():
     parser = argparse.ArgumentParser(
         description="Unified prediction market data pipeline"
     )
@@ -172,15 +185,19 @@ def main():
     parser.add_argument("--limit", type=int, default=200, help="Max markets per exchange")
     parser.add_argument("--output", type=str, default="markets.json", help="Output file path")
     parser.add_argument(
-        "--format", choices=["json", "jsonl", "embedding"], default="json",
-        help="Output format",
+        "--format", choices=["json", "jsonl", "embedding", "none"], default="json",
+        help="Output format (use 'none' if only using --vector)",
     )
+    parser.add_argument("--vector", action="store_true", help="Upsert to Qdrant vector store")
     parser.add_argument("--summary", action="store_true", help="Print summary to stdout")
 
     args = parser.parse_args()
     exchanges = [Exchange(e) for e in args.exchanges]
 
-    markets = asyncio.run(run_pipeline(exchanges, args.status, args.limit))
+    markets = await run_pipeline(exchanges, args.status, args.limit)
+
+    if args.vector:
+        await export_to_vector_store(markets)
 
     path = Path(args.output)
     if args.format == "json":
@@ -194,5 +211,10 @@ def main():
         print_summary(markets)
 
 
+def main():
+    asyncio.run(async_main())
+
+
 if __name__ == "__main__":
     main()
+
