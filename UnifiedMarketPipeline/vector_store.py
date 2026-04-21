@@ -24,10 +24,17 @@ def setup_client() -> QdrantClient:
     return client
 
 
-def upsert_markets(data: List[Dict[str, Any]], client: Optional[QdrantClient] = None):
+def upsert_markets(
+    data: List[Dict[str, Any]],
+    client: Optional[QdrantClient] = None,
+    batch_size: int = 64,
+    parallel: int = 0,
+):
     """
     Core logic to insert/update market records in Qdrant.
     Can be called directly by the pipeline or other services.
+
+    parallel=0 lets FastEmbed use all available CPU cores; parallel=1 is serial.
     """
     if client is None:
         client = setup_client()
@@ -61,13 +68,16 @@ def upsert_markets(data: List[Dict[str, Any]], client: Optional[QdrantClient] = 
         return
 
     logger.info(f"Upserting {len(documents)} markets to Qdrant collection '{COLLECTION_NAME}'...")
+    logger.info(f"Embedding with batch_size={batch_size}, parallel={'all cores' if parallel == 0 else parallel}")
 
     # client.add() handles generating embeddings via FastEmbed and upserts
     client.add(
         collection_name=COLLECTION_NAME,
         documents=documents,
         metadata=metadata,
-        ids=ids
+        ids=ids,
+        batch_size=batch_size,
+        parallel=parallel,
     )
     logger.info(f"Successfully upserted {len(documents)} markets.")
 

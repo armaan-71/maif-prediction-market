@@ -133,16 +133,22 @@ def export_embedding_corpus(markets: list[UnifiedMarket], path: Path):
     logger.info(f"Exported embedding corpus ({len(records)} docs) to {path}")
 
 
-async def export_to_vector_store(markets: list[UnifiedMarket]):
+async def export_to_vector_store(
+    markets: list[UnifiedMarket],
+    batch_size: int = 64,
+    parallel: int = 0,
+):
     """Index markets in the Qdrant vector database."""
     if not markets:
         return
-    
+
     logger.info(f"Indexing {len(markets)} markets into Qdrant...")
     data = [m.to_dict() for m in markets]
-    
+
     # Run in thread pool because embedding generation is CPU intensive
-    await asyncio.to_thread(vector_store.upsert_markets, data)
+    await asyncio.to_thread(
+        vector_store.upsert_markets, data, None, batch_size, parallel
+    )
 
 
 def print_summary(markets: list[UnifiedMarket]):
@@ -189,6 +195,14 @@ async def async_main():
         help="Output format (use 'none' if only using --vector)",
     )
     parser.add_argument("--vector", action="store_true", help="Upsert to Qdrant vector store")
+    parser.add_argument(
+        "--vector-batch-size", type=int, default=64,
+        help="Docs per embed+upsert batch (default: 64)",
+    )
+    parser.add_argument(
+        "--vector-parallel", type=int, default=0,
+        help="Embedding workers (0=all cores, 1=serial). Default: 0",
+    )
     parser.add_argument("--summary", action="store_true", help="Print summary to stdout")
 
     args = parser.parse_args()
@@ -197,7 +211,9 @@ async def async_main():
     markets = await run_pipeline(exchanges, args.status, args.limit)
 
     if args.vector:
-        await export_to_vector_store(markets)
+        await export_to_vector_store(
+            markets, args.vector_batch_size, args.vector_parallel
+        )
 
     path = Path(args.output)
     if args.format == "json":

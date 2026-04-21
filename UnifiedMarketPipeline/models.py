@@ -7,12 +7,13 @@ and cross-exchange arbitrage detection.
 """
 
 from __future__ import annotations
-from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from enum import Enum
 from typing import Optional
 import json
 import hashlib
+
+from pydantic import BaseModel, Field
 
 
 # ─── Enums ────────────────────────────────────────────────────────────────────
@@ -47,8 +48,7 @@ class ResolutionSource(str, Enum):
 
 # ─── Core Data Model ──────────────────────────────────────────────────────────
 
-@dataclass
-class Outcome:
+class Outcome(BaseModel):
     """A single tradable outcome within a market."""
     label: str                          # "Yes", "No", "Trump", "Harris", etc.
     price: Optional[float] = None       # 0.0-1.0 implied probability
@@ -56,8 +56,7 @@ class Outcome:
     index: int = 0                      # Position in outcome array
 
 
-@dataclass
-class UnifiedMarket:
+class UnifiedMarket(BaseModel):
     """
     Canonical representation of a single prediction market contract.
 
@@ -75,7 +74,7 @@ class UnifiedMarket:
     question: str = ""                  # The core question text
     description: str = ""               # Extended description / rules
     category: str = ""                  # Exchange-assigned category
-    tags: list[str] = field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
 
     # ── Event Grouping ────────────────────────────────────────────────────
     event_id: Optional[str] = None      # Parent event/series ID
@@ -84,7 +83,7 @@ class UnifiedMarket:
 
     # ── Outcome Structure ─────────────────────────────────────────────────
     outcome_type: OutcomeType = OutcomeType.BINARY
-    outcomes: list[Outcome] = field(default_factory=list)
+    outcomes: list[Outcome] = Field(default_factory=list)
 
     # ── Pricing Snapshot ──────────────────────────────────────────────────
     yes_price: Optional[float] = None   # Implied prob of primary outcome
@@ -152,22 +151,11 @@ class UnifiedMarket:
         return hashlib.sha256(self.embedding_text.encode()).hexdigest()[:16]
 
     def to_dict(self) -> dict:
-        d = asdict(self)
+        d = self.model_dump(mode="json")
         d["uid"] = self.uid
         d["embedding_text"] = self.embedding_text
         d["content_hash"] = self.content_hash
-        # Serialize enums and datetimes
-        for k, v in d.items():
-            if isinstance(v, Enum):
-                d[k] = v.value
-            elif isinstance(v, datetime):
-                d[k] = v.isoformat()
-        if "outcomes" in d:
-            for o in d["outcomes"]:
-                for ok, ov in o.items():
-                    if isinstance(ov, Enum):
-                        o[ok] = ov.value
         return d
 
     def to_json(self) -> str:
-        return json.dumps(self.to_dict(), indent=2, default=str)
+        return json.dumps(self.to_dict(), indent=2)
