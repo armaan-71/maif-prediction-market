@@ -64,7 +64,7 @@ class ArbitrageCalculator:
 
         # Use 1.0 - yes_price as a fallback for no_price if it's missing (common in some APIs)
         a_yes = market_a.yes_price
-        a_no = market_b.no_price if market_a.no_price is not None else (1.0 - a_yes)
+        a_no = market_a.no_price if market_a.no_price is not None else (1.0 - a_yes)
         
         b_yes = market_b.yes_price
         b_no = market_b.no_price if market_b.no_price is not None else (1.0 - b_yes)
