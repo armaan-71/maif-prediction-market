@@ -1,22 +1,18 @@
 """
-LLM-based pairwise relation classification using Groq (llama-3.3-70b-versatile).
-Adapted from LLM-testing/llm-decision.py.
+LLM-based pairwise relation classification using Groq (llama-3.1-8b-instant).
 """
 from __future__ import annotations
 
 import json
 import os
 import time
-from itertools import combinations
 
 from dotenv import load_dotenv
 from groq import Groq
 
-load_dotenv()
-
 from .models import ClassifiedPair, MarketCluster, MarketSummary, RelationType
 
-GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_MODEL = "llama-3.1-8b-instant"
 
 SYSTEM_PROMPT = """
 You are a semantic contract comparison engine for prediction markets.
@@ -198,17 +194,33 @@ def classify_cluster(
     cluster: MarketCluster,
     client: Groq,
     cross_exchange_only: bool = True,
+    max_pairs: int = 0,
 ) -> list[ClassifiedPair]:
+    """Classify all eligible pairs in a cluster. max_pairs=0 means no cap."""
+    candidates = [
+        (a, b)
+        for i, a in enumerate(cluster.markets)
+        for b in cluster.markets[i + 1:]
+        if not _should_skip_pair(a, b, cross_exchange_only=cross_exchange_only)
+    ]
+    if max_pairs and len(candidates) > max_pairs:
+        print(f"[classifier] Cluster {cluster.cluster_id}: capping {len(candidates)} → {max_pairs} pairs")
+        candidates = candidates[:max_pairs]
+
     results: list[ClassifiedPair] = []
-    for a, b in combinations(cluster.markets, 2):
-        if _should_skip_pair(a, b, cross_exchange_only=cross_exchange_only):
-            continue
+    for a, b in candidates:
         pair = classify_pair(a, b, client)
         results.append(pair)
     return results
 
 
+def has_cross_exchange_pairs(cluster: MarketCluster) -> bool:
+    exchanges = {m.exchange for m in cluster.markets}
+    return len(exchanges) > 1
+
+
 def make_groq_client() -> Groq:
+    load_dotenv()
     api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
         raise EnvironmentError(

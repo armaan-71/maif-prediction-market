@@ -56,3 +56,23 @@ class PipelineOutput(BaseModel):
     total_clusters: int
     total_pairs_classified: int
     generated_at: str
+
+
+class ArbitrageCandidate(BaseModel):
+    """Price-free record of a confirmed semantic relationship between two markets.
+    Written to arb_pairs.json and consumed by the poller."""
+    uid_a: str
+    uid_b: str
+    native_id_a: str
+    native_id_b: str
+    exchange_a: str
+    exchange_b: str
+    question_a: str
+    question_b: str
+    relation: RelationType
+    confidence: float
+
+
+class ArbPairsOutput(BaseModel):
+    pairs: list[ArbitrageCandidate]
+    generated_at: str

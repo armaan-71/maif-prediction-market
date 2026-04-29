@@ -17,9 +17,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from .arbitrage import MIN_ARB_EDGE, MIN_CONFIDENCE, score_pair
-from .classifier import classify_cluster, make_groq_client
+from .classifier import classify_cluster, has_cross_exchange_pairs, make_groq_client
 from .grouper import DEFAULT_THRESHOLD, build_clusters, load_markets
-from .models import ArbitrageOpportunity, PipelineOutput, RelationType
+from .models import (
+    ArbitrageCandidate, ArbPairsOutput,
+    ArbitrageOpportunity, PipelineOutput, RelationType,
+)
 
 
 def run(
@@ -29,6 +32,7 @@ def run(
     similarity_threshold: float = DEFAULT_THRESHOLD,
     min_confidence: float = MIN_CONFIDENCE,
     min_arb_edge: float = MIN_ARB_EDGE,
+    max_pairs_per_cluster: int = 100,
 ) -> PipelineOutput:
     # ── 1. Load markets ──────────────────────────────────────────────────────
     print(f"[pipeline] Loading markets from {markets_path}...")
@@ -52,20 +56,63 @@ def run(
         )
 
     # ── 3. LLM classification ────────────────────────────────────────────────
+    # Pre-filter: skip clusters with no cross-exchange pairs to avoid wasting tokens.
+    cross_clusters = [c for c in clusters if has_cross_exchange_pairs(c)]
+    skipped = len(clusters) - len(cross_clusters)
+    print(
+        f"[pipeline] {len(cross_clusters)} clusters have cross-exchange pairs "
+        f"({skipped} single-exchange clusters skipped)."
+    )
+
     groq = make_groq_client()
     all_pairs = []
-    for cluster in clusters:
-        print(
-            f"[pipeline] Classifying cluster {cluster.cluster_id} "
-            f"({len(cluster.markets)} markets, "
-            f"{len(cluster.markets) * (len(cluster.markets) - 1) // 2} pairs)..."
+    for cluster in cross_clusters:
+        n = len(cluster.markets)
+        cross_count = sum(
+            1 for i, a in enumerate(cluster.markets)
+            for b in cluster.markets[i + 1:]
+            if a.exchange != b.exchange
         )
-        pairs = classify_cluster(cluster, groq)
+        capped = f" → capping at {max_pairs_per_cluster}" if cross_count > max_pairs_per_cluster else ""
+        print(
+            f"[pipeline] Cluster {cluster.cluster_id}: {n} markets, "
+            f"{cross_count} cross-exchange pairs{capped}"
+        )
+        pairs = classify_cluster(cluster, groq, max_pairs=max_pairs_per_cluster)
         all_pairs.extend(pairs)
 
     print(f"[pipeline] Classified {len(all_pairs)} pairs total.")
 
-    # ── 4. Score for arbitrage ───────────────────────────────────────────────
+    # ── 4. Build price-free arb candidates (written to arb_pairs.json) ───────
+    # Only keep pairs with actionable relations and sufficient confidence.
+    # Prices are intentionally excluded here — the poller fetches live quotes.
+    now = datetime.now(timezone.utc).isoformat()
+    candidates: list[ArbitrageCandidate] = []
+    for pair in all_pairs:
+        if pair.relation in (RelationType.UNRELATED, RelationType.AMBIGUOUS):
+            continue
+        if pair.confidence < min_confidence:
+            continue
+        a, b = pair.market_a, pair.market_b
+        candidates.append(ArbitrageCandidate(
+            uid_a=a.uid,
+            uid_b=b.uid,
+            native_id_a=a.uid.split(":", 1)[1],
+            native_id_b=b.uid.split(":", 1)[1],
+            exchange_a=a.exchange,
+            exchange_b=b.exchange,
+            question_a=a.question,
+            question_b=b.question,
+            relation=pair.relation,
+            confidence=pair.confidence,
+        ))
+
+    pairs_path = Path(output_path).parent / "arb_pairs.json"
+    with open(pairs_path, "w", encoding="utf-8") as f:
+        json.dump(ArbPairsOutput(pairs=candidates, generated_at=now).model_dump(), f, indent=2, default=str)
+    print(f"[pipeline] Wrote {len(candidates)} arb candidates to {pairs_path}")
+
+    # ── 5. Score against snapshot prices (for debugging / last-run summary) ──
     opportunities: list[ArbitrageOpportunity] = []
     unrelated = 0
     ambiguous = 0
@@ -81,23 +128,23 @@ def run(
             opportunities.append(opp)
 
     opportunities.sort(key=lambda o: o.arb_edge, reverse=True)
-    print(f"[pipeline] Found {len(opportunities)} arbitrage opportunities.")
+    print(f"[pipeline] Found {len(opportunities)} snapshot opportunities (prices may be stale).")
 
-    # ── 5. Output ────────────────────────────────────────────────────────────
+    # ── 6. Write snapshot output ─────────────────────────────────────────────
     result = PipelineOutput(
         opportunities=opportunities,
         unrelated_pairs=unrelated,
         ambiguous_pairs=ambiguous,
         total_clusters=len(clusters),
         total_pairs_classified=len(all_pairs),
-        generated_at=datetime.now(timezone.utc).isoformat(),
+        generated_at=now,
     )
 
     out_path = Path(output_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(result.model_dump(), f, indent=2, default=str)
-    print(f"[pipeline] Wrote results to {output_path}")
+    print(f"[pipeline] Wrote snapshot to {output_path}")
 
     _print_summary(result)
     return result
@@ -165,6 +212,12 @@ def main() -> None:
         default=MIN_ARB_EDGE,
         help="Minimum arb edge (profit per $1) to include in output",
     )
+    parser.add_argument(
+        "--max-pairs-per-cluster",
+        type=int,
+        default=100,
+        help="Cap LLM calls per cluster to conserve API quota (0 = no cap)",
+    )
     args = parser.parse_args()
 
     run(
@@ -174,6 +227,7 @@ def main() -> None:
         similarity_threshold=args.threshold,
         min_confidence=args.min_confidence,
         min_arb_edge=args.min_arb_edge,
+        max_pairs_per_cluster=args.max_pairs_per_cluster,
     )
 
 

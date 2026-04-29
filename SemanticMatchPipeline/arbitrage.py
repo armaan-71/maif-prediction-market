@@ -55,11 +55,9 @@ def score_pair(
             )
         elif total > 1.0:
             arb_edge = total - 1.0
-            na = 1.0 - ya if ya is not None else None
-            nb = 1.0 - yb if yb is not None else None
             strategy = (
-                f"Buy NO_A on {a.exchange} @ {na:.3f} + "
-                f"Buy NO_B on {b.exchange} @ {nb:.3f} "
+                f"Buy NO_A on {a.exchange} @ {1.0 - ya:.3f} + "
+                f"Buy NO_B on {b.exchange} @ {1.0 - yb:.3f} "
                 f"(guaranteed $1 payout for ${2.0 - total:.3f} cost)"
             )
 
@@ -88,8 +86,6 @@ def score_pair(
         total = ya + yb
         if total > 1.0:
             arb_edge = total - 1.0
-            na = 1.0 - ya
-            nb = 1.0 - yb
             strategy = (
                 f"Sell YES_A on {a.exchange} @ {ya:.3f} + "
                 f"sell YES_B on {b.exchange} @ {yb:.3f} "
