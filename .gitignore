@@ -218,7 +218,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Generated pipeline outputs (regenerated on each run)
 UnifiedMarketPipeline/markets.json
+SemanticMatchPipeline/arb_pairs.json
+SemanticMatchPipeline/opportunities.json
+app.log
 
 # Claude
 CLAUDE.md
