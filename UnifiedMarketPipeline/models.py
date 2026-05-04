@@ -141,7 +141,7 @@ class UnifiedMarket(BaseModel):
         # (skip trivial "Yes, No" which adds nothing for embedding)
         outcome_labels = [o.label for o in self.outcomes]
         trivial = {"Yes", "No", "yes", "no"}
-        if outcome_labels and not all(l in trivial for l in outcome_labels):
+        if outcome_labels and not all(label in trivial for label in outcome_labels):
             parts.append(f"Outcomes: {', '.join(outcome_labels)}")
         return " | ".join(parts)
 

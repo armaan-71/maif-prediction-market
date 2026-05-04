@@ -7,6 +7,7 @@ and emits a stream of UnifiedMarket instances.
 
 from __future__ import annotations
 import asyncio
+import json
 import logging
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
@@ -20,7 +21,6 @@ from models import (
 )
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(filename='app.log', level=logging.DEBUG)
 
 
 # ─── Base Adapter ─────────────────────────────────────────────────────────────
@@ -95,7 +95,21 @@ class KalshiAdapter(ExchangeAdapter):
         status: Optional[str] = "open",
         limit: int = 200,
         cursor: Optional[str] = None,
+        series_tickers: Optional[list[str]] = None,
     ) -> AsyncIterator[UnifiedMarket]:
+        if series_tickers:
+            # Fetch each series independently and interleave results
+            per_series = max(1, limit // len(series_tickers))
+            seen = 0
+            for ticker in series_tickers:
+                async for market in self._fetch_series(ticker, status, per_series):
+                    yield market
+                    seen += 1
+                    if seen >= limit:
+                        return
+                await asyncio.sleep(0.3)  # inter-series pause to avoid 429s
+            return
+
         params = {
             "limit": min(limit, 1000),
             # Exclude multivariate event combos (parlays).  These bundle
@@ -121,6 +135,39 @@ class KalshiAdapter(ExchangeAdapter):
 
             next_cursor = data.get("cursor")
             if not next_cursor or len(data.get("markets", [])) == 0:
+                break
+            params["cursor"] = next_cursor
+
+    async def _fetch_series(
+        self, series_ticker: str, status: Optional[str], limit: int
+    ) -> AsyncIterator[UnifiedMarket]:
+        params = {"limit": min(limit, 1000), "mve_filter": "exclude", "series_ticker": series_ticker}
+        if status:
+            params["status"] = status
+        seen = 0
+        while True:
+            for attempt in range(4):
+                resp = await self.client.get(f"{self.BASE}/markets", params=params)
+                if resp.status_code == 429:
+                    wait = 2 ** attempt
+                    logger.warning(f"[kalshi] 429 for series {series_ticker}, retrying in {wait}s")
+                    await asyncio.sleep(wait)
+                    continue
+                resp.raise_for_status()
+                break
+            else:
+                logger.error(f"[kalshi] Giving up on series {series_ticker} after 4 retries")
+                return
+            data = resp.json()
+            for m in data.get("markets", []):
+                if self._is_mve(m):
+                    continue
+                yield self._normalize(m)
+                seen += 1
+                if seen >= limit:
+                    return
+            next_cursor = data.get("cursor")
+            if not next_cursor or not data.get("markets"):
                 break
             params["cursor"] = next_cursor
 
@@ -212,7 +259,7 @@ class KalshiAdapter(ExchangeAdapter):
             description=description,
             category=m.get("category", ""),
             event_id=m.get("event_ticker"),
-            event_title=m.get("event_ticker"),  # Need separate event fetch for title
+            event_title=m.get("event_title") or m.get("event_ticker"),
             group_id=m.get("series_ticker"),
             outcome_type=OutcomeType.BINARY,
             outcomes=outcomes,
@@ -329,6 +376,7 @@ class PolymarketAdapter(ExchangeAdapter):
             if len(markets) < page_size:
                 break
             offset += page_size
+            await asyncio.sleep(0.15)  # proactive rate-limit courtesy between pages
 
     def _normalize(self, m: dict) -> UnifiedMarket:
         # Parse outcomes and prices from JSON-encoded strings
@@ -348,12 +396,25 @@ class PolymarketAdapter(ExchangeAdapter):
         # Determine outcome type
         outcome_type = OutcomeType.BINARY if len(outcomes) <= 2 else OutcomeType.MULTI
 
+        # Resolution rules: use description text (resolutionSource is the oracle name/URL, not rules)
+        description = m.get("description", "")
+        resolution_rules = m.get("resolutionRules", description)
+
+        # Result: derive yes/no from resolved flag + outcome data, not the oracle address
+        result: Optional[str] = None
+        if m.get("resolved"):
+            resolved_outcome = (m.get("resolvedOutcome") or "").strip()
+            if resolved_outcome.lower() in ("yes", "true", "1"):
+                result = "yes"
+            elif resolved_outcome.lower() in ("no", "false", "0"):
+                result = "no"
+
         return UnifiedMarket(
             exchange=Exchange.POLYMARKET,
             native_id=m.get("conditionId", m.get("id", "")),
             slug=m.get("slug"),
             question=m.get("question", m.get("title", "")),
-            description=m.get("description", ""),
+            description=description,
             category=m.get("groupItemTitle", ""),
             tags=self._extract_tags(m),
             event_id=m.get("eventSlug"),
@@ -371,15 +432,14 @@ class PolymarketAdapter(ExchangeAdapter):
             close_at=self._parse_ts(m.get("endDate")),
             status=self._map_status(m),
             resolution_source=ResolutionSource.UMA_ORACLE,
-            resolution_rules=m.get("resolutionSource", ""),
-            result=m.get("resolvedBy"),
+            resolution_rules=resolution_rules,
+            result=result,
             url=f"https://polymarket.com/event/{m.get('slug', '')}",
             fetched_at=datetime.now(timezone.utc),
         )
 
     @staticmethod
     def _parse_json_array(val) -> list:
-        import json
         if isinstance(val, list):
             return val
         if isinstance(val, str):
@@ -438,20 +498,36 @@ class ManifoldAdapter(ExchangeAdapter):
         limit: int = 100,
         cursor: Optional[str] = None,
     ) -> AsyncIterator[UnifiedMarket]:
-        params = {"limit": min(limit, 1000)}
-        if cursor:
-            params["before"] = cursor
+        fetched = 0
+        before = cursor  # cursor is the last market id for Manifold
+        while True:
+            params = {"limit": min(limit - fetched, 1000)}
+            if before:
+                params["before"] = before
 
-        resp = await self.client.get(f"{self.BASE}/markets", params=params)
-        resp.raise_for_status()
-        markets = resp.json()
+            resp = await self.client.get(f"{self.BASE}/markets", params=params)
+            resp.raise_for_status()
+            markets = resp.json()
 
-        for m in markets:
-            if status == "open" and m.get("isResolved", False):
-                continue
-            if m.get("outcomeType") not in ("BINARY", "MULTIPLE_CHOICE"):
-                continue
-            yield self._normalize(m)
+            if not markets:
+                break
+
+            last_id = None
+            for m in markets:
+                if status == "open" and m.get("isResolved", False):
+                    continue
+                if m.get("outcomeType") not in ("BINARY", "MULTIPLE_CHOICE"):
+                    continue
+                yield self._normalize(m)
+                fetched += 1
+                last_id = m.get("id")
+                if fetched >= limit:
+                    return
+
+            if len(markets) < params["limit"] or last_id is None:
+                break
+            before = last_id
+            await asyncio.sleep(0.2)
 
     def _normalize(self, m: dict) -> UnifiedMarket:
         prob = m.get("probability")
@@ -482,7 +558,7 @@ class ManifoldAdapter(ExchangeAdapter):
             outcome_type=outcome_type,
             outcomes=outcomes,
             yes_price=prob,
-            no_price=(1.0 - prob) if prob else None,
+            no_price=(1.0 - prob) if prob is not None else None,
             last_price=prob,
             volume_total=m.get("volume"),
             volume_24h=m.get("volume24Hours"),
@@ -516,24 +592,37 @@ class MetaculusAdapter(ExchangeAdapter):
         limit: int = 100,
         cursor: Optional[str] = None,
     ) -> AsyncIterator[UnifiedMarket]:
-        params = {"limit": min(limit, 100), "type": "forecast"}
-        if status == "open":
-            params["status"] = "open"
-        if cursor:
-            params["offset"] = int(cursor)
+        fetched = 0
+        offset = int(cursor) if cursor else 0
+        page_size = min(100, limit)
+        while True:
+            params = {"limit": page_size, "type": "forecast", "offset": offset}
+            if status == "open":
+                params["status"] = "open"
 
-        resp = await self.client.get(
-            f"{self.BASE}/questions/",
-            params=params,
-            headers={"Accept": "application/json"},
-        )
-        resp.raise_for_status()
-        data = resp.json()
+            resp = await self.client.get(
+                f"{self.BASE}/questions/",
+                params=params,
+                headers={"Accept": "application/json"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            results = data.get("results", [])
+            if not results:
+                break
 
-        for q in data.get("results", []):
-            market = self._normalize(q)
-            if market:
-                yield market
+            for q in results:
+                market = self._normalize(q)
+                if market:
+                    yield market
+                    fetched += 1
+                    if fetched >= limit:
+                        return
+
+            if not data.get("next"):
+                break
+            offset += page_size
+            await asyncio.sleep(0.2)
 
     def _normalize(self, q: dict) -> Optional[UnifiedMarket]:
         community_pred = q.get("community_prediction", {})

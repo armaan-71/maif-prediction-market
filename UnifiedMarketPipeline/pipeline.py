@@ -29,11 +29,15 @@ from adapters import (
     MetaculusAdapter,
 )
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
 logger = logging.getLogger("pipeline")
+
+
+def setup_logging(level: int = logging.INFO) -> None:
+    """Configure root logging once. Call from __main__ blocks only."""
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
 
 
 ADAPTER_MAP = {
@@ -49,6 +53,7 @@ async def fetch_exchange(
     client: httpx.AsyncClient,
     status: str = "open",
     limit: int = 200,
+    series_tickers: Optional[list[str]] = None,
 ) -> list[UnifiedMarket]:
     """Fetch and normalize all markets from one exchange."""
     adapter_cls = ADAPTER_MAP[exchange]
@@ -56,8 +61,12 @@ async def fetch_exchange(
     markets = []
     count = 0
 
+    kwargs: dict = {"status": status, "limit": limit}
+    if series_tickers:
+        kwargs["series_tickers"] = series_tickers
+
     try:
-        async for market in adapter.fetch_markets(status=status, limit=limit):
+        async for market in adapter.fetch_markets(**kwargs):
             markets.append(market)
             count += 1
             if count >= limit:
@@ -75,11 +84,13 @@ async def run_pipeline(
     exchanges: list[Exchange],
     status: str = "open",
     limit: int = 200,
+    kalshi_series: Optional[list[str]] = None,
 ) -> list[UnifiedMarket]:
     """Fetch from all requested exchanges concurrently."""
     async with httpx.AsyncClient(timeout=30.0) as client:
         tasks = [
-            fetch_exchange(exchange, client, status, limit)
+            fetch_exchange(exchange, client, status, limit,
+                           series_tickers=kalshi_series if exchange == Exchange.KALSHI else None)
             for exchange in exchanges
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -223,11 +234,12 @@ async def async_main():
     elif args.format == "embedding":
         export_embedding_corpus(markets, path)
 
-    if args.summary or True:  # Always print summary
+    if args.summary:
         print_summary(markets)
 
 
 def main():
+    setup_logging()
     asyncio.run(async_main())
 
 

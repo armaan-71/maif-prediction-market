@@ -1,3 +1,18 @@
 
 # Qdrant data
 qdrant_data/
+qdrant_test/
+# Cached historical price data
+data/historical/
+# Test artifacts
+verified_pairs.test.json
+trades_output.json
+bench_results/
+# Logs
+*.log
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+# Environment
+.env

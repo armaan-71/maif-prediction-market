@@ -1,0 +1,108 @@
+[
+  {
+    "pair_id": "pair_20260502195332_0xa7cb4135c6d9c36da0e343874dd5b455de739c6d1b9f9f5583dd9320aacf5db2",
+    "market_a": {
+      "uid": "polymarket:0xa7cb4135c6d9c36da0e343874dd5b455de739c6d1b9f9f5583dd9320aacf5db2",
+      "exchange": "polymarket",
+      "native_id": "0xa7cb4135c6d9c36da0e343874dd5b455de739c6d1b9f9f5583dd9320aacf5db2",
+      "question": "Will the Fed increase interest rates by 25 bps after the June 2026 meeting?",
+      "yes_price": 0.0075,
+      "no_price": 0.9925,
+      "url": "https://polymarket.com/event/will-the-fed-increase-interest-rates-by-25-bps-after-the-june-2026-meeting",
+      "outcomes": [
+        {
+          "label": "Yes",
+          "price": 0.0075,
+          "token_id": "54688507565884542490190759171719899637342914252863057837926715255559077706253",
+          "index": 0
+        },
+        {
+          "label": "No",
+          "price": 0.9925,
+          "token_id": "11860607772349332991076953711276491732463246158502547301609855788223626456599",
+          "index": 1
+        }
+      ]
+    },
+    "market_b": {
+      "uid": "kalshi:KXFEDDECISION-26JUN-H25",
+      "exchange": "kalshi",
+      "native_id": "KXFEDDECISION-26JUN-H25",
+      "question": "Will the Federal Reserve Hike rates by 25bps at their June 2026 meeting?",
+      "yes_price": 0.01,
+      "no_price": 0.98,
+      "url": "https://kalshi.com/markets/KXFEDDECISION-26JUN-H25",
+      "outcomes": [
+        {
+          "label": "Yes",
+          "price": 0.01,
+          "token_id": null,
+          "index": 0
+        },
+        {
+          "label": "No",
+          "price": 0.98,
+          "token_id": null,
+          "index": 1
+        }
+      ]
+    },
+    "relation": "IDENTICAL",
+    "confidence": 0.95,
+    "reason": "Market A resolves YES when the Fed increases interest rates by 25 bps after the June 2026 meeting. Market B resolves YES when the Federal Reserve hikes rates by 25 bps at their June 2026 meeting. These conditions are the same.",
+    "discovered_at": "2026-05-02T19:53:32.941473"
+  },
+  {
+    "pair_id": "pair_20260502200202_0xdde06286a7b9464d344f410ab0b3d2ebc6469904e72c27fd982f65fdbf78768d",
+    "market_a": {
+      "uid": "polymarket:0xdde06286a7b9464d344f410ab0b3d2ebc6469904e72c27fd982f65fdbf78768d",
+      "exchange": "polymarket",
+      "native_id": "0xdde06286a7b9464d344f410ab0b3d2ebc6469904e72c27fd982f65fdbf78768d",
+      "question": "Will the Fed decrease interest rates by 25 bps after the June 2026 meeting?",
+      "yes_price": 0.0385,
+      "no_price": 0.9615,
+      "url": "https://polymarket.com/event/will-the-fed-decrease-interest-rates-by-25-bps-after-the-june-2026-meeting",
+      "outcomes": [
+        {
+          "label": "Yes",
+          "price": 0.0385,
+          "token_id": "65193234666628291664907888364936366210889305490897648116746073820519263548476",
+          "index": 0
+        },
+        {
+          "label": "No",
+          "price": 0.9615,
+          "token_id": "28290293140018107764072370767749010110409017615323596573647425138985988593200",
+          "index": 1
+        }
+      ]
+    },
+    "market_b": {
+      "uid": "kalshi:KXFEDDECISION-26JUN-C25",
+      "exchange": "kalshi",
+      "native_id": "KXFEDDECISION-26JUN-C25",
+      "question": "Will the Federal Reserve Cut rates by 25bps at their June 2026 meeting?",
+      "yes_price": 0.04,
+      "no_price": 0.95,
+      "url": "https://kalshi.com/markets/KXFEDDECISION-26JUN-C25",
+      "outcomes": [
+        {
+          "label": "Yes",
+          "price": 0.04,
+          "token_id": null,
+          "index": 0
+        },
+        {
+          "label": "No",
+          "price": 0.95,
+          "token_id": null,
+          "index": 1
+        }
+      ]
+    },
+    "relation": "IDENTICAL",
+    "confidence": 0.95,
+    "reason": "Market A resolves YES when the Fed decreases interest rates by 25 bps after the June 2026 meeting. Market B resolves YES when the Federal Reserve cuts rates by 25 bps at their June 2026 meeting. These conditions are the same.",
+    "discovered_at": "2026-05-02T20:02:02.233989"
+  }
+]
